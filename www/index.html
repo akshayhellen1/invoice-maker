@@ -484,6 +484,9 @@ OTH=['Stationery','Printing / Xerox','Internet / Data','Parking / Toll','Trainin
 let S={info:{trainer:'',email:'',phone:'',invNo:'INV-'+new Date().toISOString().slice(0,7).replace('-',''),invDate:new Date().toISOString().slice(0,10),company:'',addr:'',inst:'',domain:'',days:'',from:'',to:'',venue:'',po:'',bank:''},items:[],month:'all'};
 let tab='dash',cat='food',edit=null,pending=null,fcat='all';
 try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+if(!S.trainings){S.trainings=[{id:'t1',info:S.info}];S.cur='t1';S.items.forEach(i=>i.tid='t1')}
+if(!S.trainings.some(t=>t.id===S.cur))S.cur=S.trainings[0].id;
+delete S.info;Object.defineProperty(S,'info',{get:()=>S.trainings.find(t=>t.id===S.cur).info});
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));return true}catch(e){toast('Storage full: export now, then delete old receipt photos');return false}}
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',2600)}
 const inr=n=>'₹'+(+n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -491,17 +494,23 @@ const opts=(a,v)=>a.map(x=>`<option ${x===v?'selected':''}>${x}</option>`).join(
 const TABS=[['dash','📊 Dashboard'],['add','➕ Add Expense'],['list','🗂️ Expenses'],['info','🏫 Training Details'],['exp','📤 Export']];
 function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" onclick="go('${k}')">${l}</button>`).join('')}
 function go(t){tab=t;if(t!=='add'){edit=null;pending=null}render();scrollTo(0,0)}
-const months=()=>[...new Set(S.items.map(i=>i.date.slice(0,7)))].sort().reverse();
-const view=()=>S.items.filter(i=>S.month==='all'||i.date.startsWith(S.month)).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+const months=()=>[...new Set(S.items.filter(i=>i.tid===S.cur).map(i=>i.date.slice(0,7)))].sort().reverse();
+const view=()=>S.items.filter(i=>i.tid===S.cur&&(S.month==='all'||i.date.startsWith(S.month))).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
 const sum=a=>a.reduce((s,i)=>s+(+i.amt||0),0);
 function mSel(){return `<select onchange="S.month=this.value;save();render()" style="max-width:220px"><option value="all">All months</option>${months().map(m=>`<option value="${m}" ${S.month===m?'selected':''}>${new Date(m+'-01').toLocaleString('en',{month:'long',year:'numeric'})}</option>`).join('')}</select>`}
-function render(){nav();$('#v').innerHTML=({dash,add,list,info,exp})[tab]()}
+const tl=t=>{const i=t.info;return ([i.inst,i.domain].filter(Boolean).join(' · ')||'New training (add details)')+(i.from?' ('+dm(i.from)+')':'')};
+function bar(){return `<div class="card"><div class="row"><div style="flex:1;min-width:180px"><label>Current training</label><select onchange="sw(this.value)">${S.trainings.map(t=>`<option value="${t.id}" ${t.id===S.cur?'selected':''}>${esc(tl(t))}</option>`).join('')}</select></div><button class="btn" style="margin-top:18px" onclick="newT()">➕ New training</button></div></div>`}
+function sw(id){S.cur=id;S.month='all';fcat='all';edit=null;pending=null;save();render()}
+function newT(){const p=S.info,id='t'+Date.now().toString(36),d=new Date().toISOString();S.trainings.push({id,info:{trainer:p.trainer,email:p.email,phone:p.phone,invNo:'INV-'+d.slice(0,7).replace('-','')+'-'+(S.trainings.length+1),invDate:d.slice(0,10),company:p.company,addr:p.addr,inst:'',domain:'',days:'',from:'',to:'',venue:'',po:'',bank:p.bank}});S.cur=id;S.month='all';fcat='all';edit=null;pending=null;save();tab='info';render();scrollTo(0,0);toast('New training added. Fill in its details')}
+function delT(){if(S.trainings.length<2||!confirm('Delete this training and all its expenses?'))return;S.items=S.items.filter(i=>i.tid!==S.cur);S.trainings=S.trainings.filter(t=>t.id!==S.cur);S.cur=S.trainings[0].id;save();go('dash')}
+function allT(){return `<div class="card"><h2>All trainings</h2>${S.trainings.map(t=>{const a=S.items.filter(i=>i.tid===t.id);return `<div class="it" style="cursor:pointer" onclick="sw('${t.id}')"><div class="m"><b>${esc(tl(t))}</b><small>${a.length} bills${t.id===S.cur?' · current':''}</small></div><div class="amt">${inr(sum(a))}</div></div>`}).join('')}</div>`}
+function render(){nav();$('#v').innerHTML=bar()+({dash,add,list,info,exp})[tab]()}
 function dash(){const v=view(),t=sum(v);
 return `<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Overview</h2>${mSel()}</div>
 <div class="grid" style="margin-bottom:14px"><div class="stat" style="background:linear-gradient(120deg,var(--pri),var(--pri2))"><b>${inr(t)}</b><span>Total claim · ${v.length} bills</span></div>
 ${Object.entries(CAT).map(([k,c])=>{const a=v.filter(i=>i.cat===k);return `<div class="stat" style="background:${c.h}"><b>${inr(sum(a))}</b><span>${c.i} ${c.n} · ${a.length}</span></div>`}).join('')}</div>
 <div class="card"><h2>Spend split</h2>${t?Object.entries(CAT).map(([k,c])=>{const s=sum(v.filter(i=>i.cat===k)),p=t?s/t*100:0;return `<div class="row" style="justify-content:space-between"><span>${c.i} ${c.n}</span><b>${inr(s)} · ${p.toFixed(0)}%</b></div><div class="bar"><i style="width:${p}%;background:${c.h}"></i></div>`}).join(''):'<div class="empty">No expenses yet. Tap “Add Expense” to log your first bill.</div>'}</div>
-<div class="card"><h2>Quick steps</h2><ol style="margin:0;padding-left:20px;color:var(--mut)"><li>Fill <b>Training Details</b> once (company, institution, days).</li><li>After each meal or trip, add the bill with its photo.</li><li>At month end open <b>Export</b> and get the PDF invoice and Excel.</li></ol></div>`}
+${allT()}<div class="card"><h2>Quick steps</h2><ol style="margin:0;padding-left:20px;color:var(--mut)"><li>Fill <b>Training Details</b> once (company, institution, days).</li><li>After each meal or trip, add the bill with its photo.</li><li>At month end open <b>Export</b> and get the PDF invoice and Excel.</li></ol></div>`}
 function add(){const e=edit?S.items.find(i=>i.id===edit):{};const d=e.date||new Date().toISOString().slice(0,10),tm=e.time||new Date().toTimeString().slice(0,5);if(e.cat)cat=e.cat;
 const img=pending??e.img;
 return `<div class="card"><h2>${edit?'Edit expense':'New expense'}</h2>
@@ -517,7 +526,7 @@ ${cat==='other'?`<div><label>Type</label><select id="f_otype">${opts(OTH,e.otype
 function pick(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const m=900,k=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*k;c.height=im.height*k;c.getContext('2d').drawImage(im,0,0,c.width,c.height);pending=c.toDataURL('image/jpeg',.6);$('#pv').innerHTML=`<img src="${pending}" alt="Receipt preview">`};im.src=r.result};r.readAsDataURL(f)}
 const g=id=>($('#f_'+id)||{}).value;
 function saveItem(){const amt=parseFloat(g('amt'));if(!g('date')||!(amt>=0)||isNaN(amt)){toast('Enter a date and amount');return}
-const o={id:edit||Date.now().toString(36),cat,date:g('date'),time:g('time'),amt,pay:g('pay'),note:g('note')};
+const o={id:edit||Date.now().toString(36),tid:S.cur,cat,date:g('date'),time:g('time'),amt,pay:g('pay'),note:g('note')};
 if(cat==='food')Object.assign(o,{meal:g('meal'),cmeal:g('cmeal'),place:g('place')});
 if(cat==='travel'){if(!g('from')||!g('to')){toast('Enter from and to locations');return}Object.assign(o,{from:g('from'),to:g('to'),mode:g('mode'),app:g('app'),km:g('km')})}
 if(cat==='stay')Object.assign(o,{place:g('place'),nights:g('nights'),app:g('app')});
@@ -534,10 +543,10 @@ ${v.length?v.map(i=>`<div class="it">${i.img?`<img src="${i.img}" alt="Receipt" 
 function zoom(id){$('#mi').src=S.items.find(i=>i.id===id).img;$('#modal').style.display='grid'}
 function del(id){if(confirm('Delete this expense?')){S.items=S.items.filter(i=>i.id!==id);save();render()}}
 const IF=[['trainer','Your name (Trainer)'],['phone','Phone'],['email','Email'],['invNo','Invoice number'],['invDate','Invoice date','date'],['company','Company / billing to'],['inst','University / institution'],['domain','Training domain / subject'],['days','Number of days','number'],['from','Training start','date'],['to','Training end','date'],['venue','Venue / city'],['po','PO / reference no.']];
-function info(){return `<div class="card"><h2>Training &amp; invoice details</h2><p style="color:var(--mut);margin-top:0">Fill this once; it appears on every invoice.</p><div class="grid">${IF.map(([k,l,t])=>`<div><label>${l}</label><input type="${t||'text'}" value="${esc(S.info[k])}" oninput="S.info['${k}']=this.value"></div>`).join('')}</div>
+function info(){return `<div class="card"><h2>Training &amp; invoice details</h2><p style="color:var(--mut);margin-top:0">Details for this training only. For the next training, tap “New training” at the top.</p><div class="grid">${IF.map(([k,l,t])=>`<div><label>${l}</label><input type="${t||'text'}" value="${esc(S.info[k])}" oninput="S.info['${k}']=this.value"></div>`).join('')}</div>
 <div class="grid" style="margin-top:12px"><div><label>Company address</label><textarea rows="3" oninput="S.info.addr=this.value">${esc(S.info.addr)}</textarea></div><div><label>Bank / UPI details (shown on invoice)</label><textarea rows="3" oninput="S.info.bank=this.value">${esc(S.info.bank)}</textarea></div></div>
-<div class="row" style="margin-top:14px"><button class="btn ok" onclick="save()&&toast('Details saved ✔')">Save details</button></div></div>`}
-function exp(){const v=view();return `<div class="card"><h2>Generate documents</h2><div class="row" style="margin-bottom:12px"><span>Period:</span>${mSel()}<b>${v.length} bills · ${inr(sum(v))}</b></div>
+<div class="row" style="margin-top:14px"><button class="btn ok" onclick="save()&&toast('Details saved ✔')">Save details</button>${S.trainings.length>1?'<button class="btn r" onclick="delT()">Delete this training</button>':''}</div></div>`}
+function exp(){const v=view();return `<div class="card"><h2>Generate documents</h2><p style="margin:0 0 10px;color:var(--mut)">Training: <b>${esc(tl(S.trainings.find(t=>t.id===S.cur)))}</b></p><div class="row" style="margin-bottom:12px"><span>Period:</span>${mSel()}<b>${v.length} bills · ${inr(sum(v))}</b></div>
 <label style="display:flex;gap:8px;align-items:center;font-size:14px;color:var(--tx)"><input type="checkbox" id="wr" checked style="width:auto"> Attach receipt photos as pages in the PDF</label>
 <div class="row" style="margin-top:14px"><button class="btn" onclick="pdf()">📄 Download PDF invoice</button><button class="btn ok" onclick="xl()">📊 Download Excel</button><button class="btn g" onclick="bk()">💾 Backup (JSON)</button></div>
 <p style="color:var(--mut);font-size:13px">Excel has separate sheets for Food (date, time, meal, amount), Travel, Stay, Other and a combined list. Data stays in this browser only, so take a backup now and then.</p></div>`}
@@ -556,7 +565,7 @@ A('Travel',c('travel').map(i=>({Date:dm(i.date),Time:i.time,From:i.from,To:i.to,
 A('Stay',c('stay').map(i=>({Date:dm(i.date),Time:i.time,Place:i.place||'',Nights:i.nights||'',Booked:i.app||'','Amount (INR)':i.amt,'Paid by':i.pay})));
 A('Other',c('other').map(i=>({Date:dm(i.date),Time:i.time,Type:i.otype,'Amount (INR)':i.amt,'Paid by':i.pay,Notes:i.note||''})));
 A('All expenses',v.map(i=>({Date:dm(i.date),Time:i.time,Category:CAT[i.cat].n,Details:label(i),'Amount (INR)':i.amt,'Paid by':i.pay})).concat([{Details:'TOTAL','Amount (INR)':sum(v)}]));
-out(`Expenses_${S.month==='all'?'All':S.month}.xlsx`,new Blob([XLSX.write(wb,{type:'array',bookType:'xlsx'})],{type:'application/octet-stream'}))}
+out(`Expenses_${(S.info.invNo||'training').replace(/\W+/g,'_')}_${S.month==='all'?'All':S.month}.xlsx`,new Blob([XLSX.write(wb,{type:'array',bookType:'xlsx'})],{type:'application/octet-stream'}))}
 function bk(){out('invoice-backup.json',new Blob([JSON.stringify(S)],{type:'application/json'}))}
 const rs=n=>'Rs. '+(+n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const dim=u=>new Promise(r=>{const i=new Image();i.onload=()=>r([i.width,i.height]);i.src=u});
